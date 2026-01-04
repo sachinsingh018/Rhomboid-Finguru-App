@@ -9,6 +9,12 @@ st.set_page_config(page_title="CIBIL PDF Extractor", layout="centered")
 st.title("📄 CIBIL PDF Account Extractor")
 st.write("Upload a CIBIL PDF and download structured account data as CSV or Excel.")
 
+def normalize_text(text):
+    text = re.sub(r"[ \t]+", " ", text)   # collapse spaces
+    text = re.sub(r"\n{2,}", "\n", text)  # collapse newlines
+    return text.strip()
+
+
 # ---------- Helper functions ----------
 def clean_amount(text):
     if not text:
@@ -36,7 +42,9 @@ uploaded_file = st.file_uploader("Upload CIBIL PDF", type=["pdf"])
 if uploaded_file:
     with st.spinner("Processing PDF..."):
         with pdfplumber.open(uploaded_file) as pdf:
-            full_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+            raw_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+            full_text = normalize_text(raw_text)
+
 
         accounts = []
 
@@ -74,14 +82,15 @@ if uploaded_file:
 
                 # ✅ FIXED DATE EXTRACTION
                 "Date Opened": extract_date(
-                    r"Date\s+Opened\s*/\s*Disbursed", block
+                    r"Date\s*Opened\s*/?\s*Disbursed", block
                 ),
                 "Date Closed": extract_date(
-                    r"Date\s+Closed", block
+                    r"Date\s*Closed", block
                 ),
                 "Date Reported": extract_date(
-                    r"Date\s+Reported\s+And\s+Certified", block
+                    r"Date\s*Reported\s*And\s*Certified", block
                 ),
+
             }
 
             # Optional: convert '-' to empty string
