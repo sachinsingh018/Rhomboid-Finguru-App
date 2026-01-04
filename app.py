@@ -16,8 +16,19 @@ def clean_amount(text):
     return re.sub(r"[₹, ]", "", text)
 
 def extract_value(pattern, text):
-    match = re.search(pattern, text, re.IGNORECASE)
+    # DOTALL handles broken / wrapped PDF lines
+    match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
     return match.group(1).strip() if match else ""
+
+def extract_date(label_pattern, text):
+    """
+    Extracts:
+    - dd/mm/yyyy
+    - OR '-' (for open accounts)
+    Works whether date is on same line or next line
+    """
+    pattern = rf"{label_pattern}\s*(?:\n|\s)+(\d{{2}}/\d{{2}}/\d{{4}}|-)"
+    return extract_value(pattern, text)
 
 # ---------- File upload ----------
 uploaded_file = st.file_uploader("Upload CIBIL PDF", type=["pdf"])
@@ -29,20 +40,19 @@ if uploaded_file:
 
         accounts = []
 
-        # Split by possible account blocks
+        # Split by account blocks
         blocks = re.split(r"\nMember Name\n", full_text)
 
         for block in blocks[1:]:
             block = "Member Name\n" + block
 
-            # Hard stop at PAYMENT STATUS to avoid footer leakage
+            # Hard stop to avoid footer noise
             block = block.split("\nPAYMENT STATUS", 1)[0]
 
             account = {
                 "Member Name": extract_value(
                     r"Member Name\s*\n([A-Za-z &]+)", block
                 ),
-                # Capture ONLY the actual account type line
                 "Account Type": extract_value(
                     r"Account Type\s*\n([^\n]+)", block
                 ),
@@ -61,19 +71,24 @@ if uploaded_file:
                 "Amount Overdue (₹)": clean_amount(
                     extract_value(r"Amount Overdue ₹([0-9,]+)", block)
                 ),
-                "Date Opened": extract_value(
-                    r"Date Opened / Disbursed\s*\n?([0-9/]+)", block
+
+                # ✅ FIXED DATE EXTRACTION
+                "Date Opened": extract_date(
+                    r"Date\s+Opened\s*/\s*Disbursed", block
                 ),
-                "Date Closed": extract_value(
-                    r"Date Closed\s*\n?([0-9/]+)", block
+                "Date Closed": extract_date(
+                    r"Date\s+Closed", block
                 ),
-                "Date Reported": extract_value(
-                    r"Date Reported And Certified\s*\n?([0-9/]+)", block
+                "Date Reported": extract_date(
+                    r"Date\s+Reported\s+And\s+Certified", block
                 ),
             }
 
-            # 🔒 STRONG VALIDATION:
-            # Only keep rows that look like real credit accounts
+            # Optional: convert '-' to empty string
+            if account["Date Closed"] == "-":
+                account["Date Closed"] = ""
+
+            # Validation
             if account["Member Name"] and account["Account Number"]:
                 accounts.append(account)
 
