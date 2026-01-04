@@ -10,30 +10,35 @@ st.title("📄 CIBIL PDF Account Extractor")
 st.write("Upload a CIBIL PDF and download structured account data as CSV or Excel.")
 
 def normalize_text(text):
-    text = re.sub(r"[ \t]+", " ", text)   # collapse spaces
-    text = re.sub(r"\n{2,}", "\n", text)  # collapse newlines
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{2,}", "\n", text)
     return text.strip()
-
 
 # ---------- Helper functions ----------
 def clean_amount(text):
     if not text:
-        return "0"
+        return ""
     return re.sub(r"[₹, ]", "", text)
 
 def extract_value(pattern, text):
-    # DOTALL handles broken / wrapped PDF lines
     match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
     return match.group(1).strip() if match else ""
 
 def extract_date(label_pattern, text):
     """
-    Extracts:
+    Robust date extractor:
     - dd/mm/yyyy
-    - OR '-' (for open accounts)
-    Works whether date is on same line or next line
+    - OR '-'
+    Handles inline / wrapped labels
     """
-    pattern = rf"{label_pattern}\s*(?:\n|\s)+(\d{{2}}/\d{{2}}/\d{{4}}|-)"
+    pattern = rf"{label_pattern}[\s:]*([\d]{{2}}/[\d]{{2}}/[\d]{{4}}|-)"
+    return extract_value(pattern, text)
+
+def extract_text_field(label_pattern, text):
+    """
+    Generic text extractor for collateral fields
+    """
+    pattern = rf"{label_pattern}[\s:]*([^\n]+)"
     return extract_value(pattern, text)
 
 # ---------- File upload ----------
@@ -45,16 +50,12 @@ if uploaded_file:
             raw_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
             full_text = normalize_text(raw_text)
 
-
         accounts = []
 
-        # Split by account blocks
         blocks = re.split(r"\nMember Name\n", full_text)
 
         for block in blocks[1:]:
             block = "Member Name\n" + block
-
-            # Hard stop to avoid footer noise
             block = block.split("\nPAYMENT STATUS", 1)[0]
 
             account = {
@@ -80,24 +81,40 @@ if uploaded_file:
                     extract_value(r"Amount Overdue ₹([0-9,]+)", block)
                 ),
 
-                # ✅ FIXED DATE EXTRACTION
-                "Date Opened": extract_date(
+                # ---------- Dates ----------
+                "Date Opened / Disbursed": extract_date(
                     r"Date\s*Opened\s*/?\s*Disbursed", block
+                ),
+                "Date of Last Payment": extract_date(
+                    r"Date\s*of\s*Last\s*Payment", block
                 ),
                 "Date Closed": extract_date(
                     r"Date\s*Closed", block
                 ),
-                "Date Reported": extract_date(
+                "Date Reported And Certified": extract_date(
                     r"Date\s*Reported\s*And\s*Certified", block
                 ),
+                "Payment Start Date": extract_date(
+                    r"Payment\s*Start\s*Date", block
+                ),
+                "Payment End Date": extract_date(
+                    r"Payment\s*End\s*Date", block
+                ),
 
+                # ---------- Collateral ----------
+                "Value of Collateral": clean_amount(
+                    extract_text_field(r"Value\s*of\s*Collateral", block)
+                ),
+                "Type of Collateral": extract_text_field(
+                    r"Type\s*of\s*Collateral", block
+                ),
             }
 
-            # Optional: convert '-' to empty string
-            if account["Date Closed"] == "-":
-                account["Date Closed"] = ""
+            # Normalize "-" to empty
+            for k, v in account.items():
+                if v == "-":
+                    account[k] = ""
 
-            # Validation
             if account["Member Name"] and account["Account Number"]:
                 accounts.append(account)
 
@@ -109,7 +126,6 @@ if uploaded_file:
             st.success(f"Extracted {len(df)} valid accounts")
             st.dataframe(df, use_container_width=True)
 
-            # ---------- Downloads ----------
             csv_buffer = BytesIO()
             xlsx_buffer = BytesIO()
 
