@@ -49,15 +49,27 @@ if uploaded_file:
         with pdfplumber.open(uploaded_file) as pdf:
             raw_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
             full_text = normalize_text(raw_text)
+            # >>> ADD HERE: detect where CLOSED ACCOUNTS section begins
+            closed_match = re.search(r"\bCLOSED ACCOUNTS\b", full_text, re.IGNORECASE)
+            closed_accounts_pos = closed_match.start() if closed_match else None
+
 
         accounts = []
 
-        blocks = re.split(r"\nMember Name\n", full_text)
+        member_blocks = list(re.finditer(r"\nMember Name\n", full_text))
 
-        for block in blocks[1:]:
-            block = "Member Name\n" + block
+        for i, match in enumerate(member_blocks):
+            start = match.start() + 1
+            end = member_blocks[i + 1].start() if i + 1 < len(member_blocks) else len(full_text)
+
+            block = full_text[start:end]
             block = block.split("\nPAYMENT STATUS", 1)[0]
 
+
+            account_status = "Open"
+            if closed_accounts_pos is not None and start > closed_accounts_pos:
+                account_status = "Closed"
+                
             account = {
                 "Member Name": extract_value(
                     r"Member Name\s*\n([A-Za-z &]+)", block
@@ -108,6 +120,8 @@ if uploaded_file:
                 "Type of Collateral": extract_text_field(
                     r"Type\s*of\s*Collateral", block
                 ),
+                "Account Status": account_status,
+
             }
 
             # Normalize "-" to empty
