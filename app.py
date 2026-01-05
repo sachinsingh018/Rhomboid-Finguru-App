@@ -4,7 +4,7 @@ import pandas as pd
 import re
 from io import BytesIO
 
-st.set_page_config(page_title="CIBIL PDF Extractor", layout="centered")
+st.set_page_config(page_title="CIBIL PDF Extractor (Individual)", layout="centered")
 
 st.title("📄 CIBIL PDF Account Extractor")
 st.write("Upload a CIBIL PDF and download structured account data as CSV or Excel.")
